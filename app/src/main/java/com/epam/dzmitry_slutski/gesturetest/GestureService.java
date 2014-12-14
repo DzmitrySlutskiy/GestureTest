@@ -1,14 +1,13 @@
 package com.epam.dzmitry_slutski.gesturetest;
 
+import android.animation.ValueAnimator;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.gesture.Gesture;
 import android.gesture.GestureOverlayView;
 import android.graphics.PixelFormat;
-import android.os.Handler;
 import android.os.IBinder;
-import android.os.Looper;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.LayoutInflater;
@@ -16,9 +15,8 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
-import android.widget.LinearLayout;
+import android.widget.RelativeLayout;
 
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -29,18 +27,24 @@ public class GestureService extends Service implements GestureOverlayView.OnGest
         View.OnClickListener {
 
     public static final String TAG = GestureService.class.getSimpleName();
-    boolean startDrag;
+    boolean isOpening;
     AtomicBoolean animateShow = new AtomicBoolean(false);
     private LayoutInflater mLayoutInflater;
-    private View mLeftMenu;
+    private View mShower;
+    private View mDrawer;
+    private View mDrawerBody;
+    private WindowManager.LayoutParams mDrawerParams;
+    private RelativeLayout.LayoutParams mDrawerBodyLayoutParams;
+    private RelativeLayout.LayoutParams mShowerLayoutParams;
+
+
     private WindowManager mWindowManager;
-    private View mView;
-    private WindowManager.LayoutParams mParams;
-    private int screenWidth;
-    private int screenHeight;
-    private float deltaX;
-    private float deltaY;
-    private LinearLayout.LayoutParams mDrawerLayoutParams;
+    private int mScreenWidth;
+    private int mScreenHeight;
+    private int mDeltaX;
+    private int mDeltaY;
+    private int mMaxWidth;
+    private int mMinWidth;
 
     @Override
     public void onCreate() {
@@ -49,16 +53,21 @@ public class GestureService extends Service implements GestureOverlayView.OnGest
         mWindowManager = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
         mLayoutInflater = (LayoutInflater) getSystemService(Context.LAYOUT_INFLATER_SERVICE);
 
+        mDrawer = mLayoutInflater.inflate(R.layout.drawer_layout, null, false);
+        mShower = mDrawer.findViewById(R.id.shower);
+        mDrawerBody = mDrawer.findViewById(R.id.drawer_body);
 
-        mLeftMenu = mLayoutInflater.inflate(R.layout.drawer_layout, null, false);
-        mView = mLeftMenu.findViewById(R.id.drawer);
-        mDrawerLayoutParams = (LinearLayout.LayoutParams) mView.getLayoutParams();
-        Button button = (Button) mLeftMenu.findViewById(R.id.clicker);
+        mDrawerBodyLayoutParams = (RelativeLayout.LayoutParams) mDrawerBody.getLayoutParams();
+        mShowerLayoutParams = (RelativeLayout.LayoutParams) mShower.getLayoutParams();
+        mMaxWidth = mShowerLayoutParams.width + mDrawerBodyLayoutParams.width;
+        mMinWidth = mShowerLayoutParams.width;
+
+        Button button = (Button) mDrawer.findViewById(R.id.clicker);
 
         button.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                removeMenu();
+                removeDrawer();
             }
         });
 //        GestureDetector detector = new GestureDetector(this, this);
@@ -68,37 +77,38 @@ public class GestureService extends Service implements GestureOverlayView.OnGest
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.d(TAG, "onStartCommand");
 
-        mParams = new WindowManager.LayoutParams(
+        prepare();
+
+        return START_NOT_STICKY;
+    }
+
+    void prepare() {
+        mDrawerParams = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_SYSTEM_ALERT,
-//                WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT);
 
-        mParams.gravity = Gravity.TOP | Gravity.START;
-//        mParams.horizontalMargin = -UiUtils.getPx(this, 100.0f);
+        mDrawerParams.gravity = Gravity.TOP | Gravity.START;
 
-        screenWidth = UiUtils.getDisplayWidth(this);
-        screenHeight = UiUtils.getDisplayHeight(this);
+        mScreenWidth = UiUtils.getDisplayWidth(this);
+        mScreenHeight = UiUtils.getDisplayHeight(this);
 
-        Log.d(TAG, "W: " + screenWidth + " H: " + screenHeight);
+        Log.d(TAG, "W: " + mScreenWidth + " H: " + mScreenHeight);
 
-        mParams.x = 0;
-        mParams.y = 0;
-//        mParams.width = WindowManager.LayoutParams.WRAP_CONTENT;
-//        mParams.width = Math.round(UiUtils.getPx(this, 10.0f));
-//        mParams.width = 20;
+        mDrawerParams.x = 0;
+        mDrawerParams.y = 0;
 
-        mParams.width = WindowManager.LayoutParams.WRAP_CONTENT;
-        mParams.height = WindowManager.LayoutParams.MATCH_PARENT;
+        mDrawerBodyLayoutParams.setMargins(- mDrawerBodyLayoutParams.width, 0, 0, 0);
+        mDrawerBody.setLayoutParams(mDrawerBodyLayoutParams);
 
-        int round = Math.round(UiUtils.getPx(this, 200.0f));
-        mDrawerLayoutParams.setMargins(-round, 0, 0, 0);
+        mDrawer.setOnTouchListener(GestureService.this);
+        mDrawer.setOnClickListener(GestureService.this);
+        mDrawerParams.width = mShowerLayoutParams.width;
 
-        mLeftMenu.setOnTouchListener(this);
-        mLeftMenu.setOnClickListener(this);
-        mWindowManager.addView(mLeftMenu, mParams);
-
-        return START_STICKY;
+        Log.d(TAG, "mDrawerParams:" + mDrawerParams + " width: " + mDrawerParams.width);
+        mWindowManager.addView(mDrawer, mDrawerParams);
     }
 
     @Override
@@ -119,34 +129,44 @@ public class GestureService extends Service implements GestureOverlayView.OnGest
 
     @Override
     public boolean onTouch(View v, MotionEvent event) {
-        float x = event.getRawX();
-        float y = event.getRawY();
-        if (event.getAction() == MotionEvent.ACTION_DOWN) {
-            deltaX = x;
-            deltaY = y;
-            Log.d(TAG, "Down: " + deltaX);
-            startDrag = true;
-        } else if (event.getAction() == MotionEvent.ACTION_UP) {
-            startDrag = false;
-            Log.d(TAG, "Up: " + deltaX);
-        } else if (event.getAction() == MotionEvent.ACTION_MOVE) {
-//            if ((x > (screenWidth / 2)) && !animateShow.get()) {
-//                animateShow.set(true);
-//                runShow();
-//            }
-            if (!animateShow.get()) {
-                Log.d(TAG, "Move: " + deltaX + " eventX: " + x);
-                mParams.x += (x - deltaX);
-                mParams.y += (y - deltaY);
+        int x = Math.round(event.getX());
+        int y = Math.round(event.getY());
+        int currentAction = event.getAction();
+        if (currentAction == MotionEvent.ACTION_DOWN) {
+            Log.d(TAG, "Down: eventX: " + x);
+            mDeltaX = x;
+            mDeltaY = y;
 
-                int round = Math.round(UiUtils.getPx(this, 200.0f)) + mParams.y;
-                mDrawerLayoutParams.setMargins(-round, 0, 0, 0);
-                mView.setLayoutParams(mDrawerLayoutParams);
-//                mDrawerLayoutParams.width = (int) deltaX;
+        } else if (currentAction == MotionEvent.ACTION_UP) {
+            Log.d(TAG, "Up: mDeltaX: " + mDeltaX + " eventX: " + x);
+            if (isOpening/* && mDrawerParams.width > mMaxWidth / 2*/) {
+                runShow();
+            } else {
+                runHide();
+            }
 
-                mWindowManager.updateViewLayout(mLeftMenu, mParams);
-                deltaX = x;
-                deltaY = y;
+        } else if (currentAction == MotionEvent.ACTION_MOVE) {
+            if (! animateShow.get()) {
+                Log.d(TAG, "width: " + mDrawerParams.width + " mDeltaX: " + mDeltaX + " eventX: " + x);
+
+                int direction = x - mDeltaX;
+                isOpening = direction > 0;
+
+                int newWidth = mDrawerParams.width + direction;
+
+                if ((mMaxWidth > newWidth) &&
+                        (newWidth > mShowerLayoutParams.width)) {
+
+                    int margin = mDrawerBodyLayoutParams.leftMargin + direction;
+                    mDrawerBodyLayoutParams.setMargins(margin, 0, 0, 0);
+//                    mDrawerBody.setLayoutParams(mDrawerBodyLayoutParams);
+
+                    mDrawerParams.width = newWidth;
+
+                    mWindowManager.updateViewLayout(mDrawer, mDrawerParams);
+                }
+                mDeltaX = x;
+                mDeltaY = y;
             }
         }
         return false;
@@ -154,42 +174,43 @@ public class GestureService extends Service implements GestureOverlayView.OnGest
 
     @Override
     public void onClick(View v) {
-        Log.d(TAG, "onClick");
-        /**/
+        //
     }
 
     private void runShow() {
-        new Thread(new Runnable() {
+        animateMove(mDrawerParams.width, mMaxWidth);
+    }
+
+    private void runHide() {
+        animateMove(mDrawerParams.width, mMinWidth);
+    }
+
+    private void animateMove(int from, int to) {
+        ValueAnimator animation = ValueAnimator.ofInt(from, to);
+        animation.setDuration(700);
+        animation.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
             @Override
-            public void run() {
-                for (int i = 100; i > 0; i--) {
-                    mParams.x -= 10;
-                    new Handler(Looper.getMainLooper()).post(new Runnable() {
-                        @Override
-                        public void run() {
-                            mWindowManager.updateViewLayout(mLeftMenu, mParams);
-                        }
-                    });
-                    try {
-                        TimeUnit.MILLISECONDS.sleep(1);
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
-                }
-                animateShow.set(false);
-                Log.d(TAG, "show finish");
+            public void onAnimationUpdate(ValueAnimator animation) {
+                Integer value = (Integer) animation.getAnimatedValue();
+
+                mDrawerParams.width = value;
+                mWindowManager.updateViewLayout(mDrawer, mDrawerParams);
+
+                int margin = value - mShowerLayoutParams.width - mDrawerBodyLayoutParams.width;
+                mDrawerBodyLayoutParams.setMargins(margin, 0, 0, 0);
             }
-        }).start();
+        });
+        animation.start();
     }
 
     @Override
     public void onDestroy() {
         super.onDestroy();
 
-        removeMenu();
+        removeDrawer();
     }
 
-    private void removeMenu() {
-        mWindowManager.removeViewImmediate(mLeftMenu);
+    private void removeDrawer() {
+        mWindowManager.removeViewImmediate(mDrawer);
     }
 }
